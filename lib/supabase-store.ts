@@ -358,15 +358,31 @@ export function createSupabaseStore(): Store {
         });
       }
 
+      // Boards and lists are polled in parallel, so another source may store the same posting
+      // between the lookups above and this insert (Postgres 23505, unique violation). Only
+      // those rows are skipped; the next poll finds them by url and merges the sources.
+      const insertedIds: string[] = [];
+      const skipped = new Set<string>();
       for (const chunk of chunks(inserts, 500)) {
         const { error } = await db.from("jobs").insert(chunk);
-        fail(error);
+        if (!error) {
+          insertedIds.push(...chunk.map((row) => row.id as string));
+          continue;
+        }
+        if (error.code !== "23505") fail(error);
+        for (const row of chunk) {
+          const { error: single } = await db.from("jobs").insert(row);
+          if (!single) insertedIds.push(row.id as string);
+          else if (single.code === "23505") skipped.add(row.id as string);
+          else fail(single);
+        }
       }
-      for (const chunk of chunks([...updates.values()], 500)) {
+      const pending = [...updates.values()].filter((row) => !skipped.has(row.id));
+      for (const chunk of chunks(pending, 500)) {
         const { error } = await db.from("jobs").upsert(chunk, { onConflict: "id" });
         fail(error);
       }
-      return { insertedIds: inserts.map((row) => row.id as string) };
+      return { insertedIds };
     },
     async listJobs(filter: JobFilter) {
       let query = db.from("jobs").select("*");
