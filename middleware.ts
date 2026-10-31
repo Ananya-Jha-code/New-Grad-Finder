@@ -1,0 +1,23 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { safeEqual, sessionToken } from "@/lib/session";
+
+export async function middleware(request: NextRequest) {
+  const password = process.env.APP_PASSWORD;
+  if (!password) return NextResponse.next();
+  const { pathname } = request.nextUrl;
+  if (pathname === "/login" || pathname === "/api/login") return NextResponse.next();
+  const expected = await sessionToken(password);
+  const cookie = request.cookies.get("if_session")?.value ?? "";
+  if (safeEqual(cookie, expected)) return NextResponse.next();
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const url = request.nextUrl.clone();
+  url.pathname = "/login";
+  url.search = "";
+  return NextResponse.redirect(url);
+}
+
+export const config = {
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+};

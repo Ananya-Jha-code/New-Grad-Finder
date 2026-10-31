@@ -1,0 +1,13 @@
+[Unit]
+Description=Jittered New Grad Finder poll
+
+[Timer]
+# Fires 6 hours after the last run, then waits a random extra 0-45 minutes.
+OnBootSec=2min
+OnUnitActiveSec=6h
+RandomizedDelaySec=45min
+Persistent=true
+Unit=new-grad-finder.service
+
+[Install]
+WantedBy=timers.target

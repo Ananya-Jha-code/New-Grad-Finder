@@ -1,0 +1,11 @@
+[Unit]
+Description=New Grad Finder ATS poll
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/new-grad-finder
+EnvironmentFile=-/opt/new-grad-finder/.env
+ExecStart=/usr/bin/npm run poll --silent -- --force
+Nice=10
