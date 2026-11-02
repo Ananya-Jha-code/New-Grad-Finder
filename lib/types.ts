@@ -124,6 +124,8 @@ export type JobFilter = {
   matchOnly?: boolean;
   family?: string;
   limit?: number;
+  // "newest" lists the most recently found jobs first instead of the best scored.
+  order?: "score" | "newest";
 };
 
 export type Classification = {
@@ -169,6 +171,9 @@ export type Application = {
   title: string;
   company: string;
   canonicalUrl: string;
+  location: string | null;
+  postedAt: string | null;
+  firstSeenAt: string;
 };
 
 export type ApplicationInput = {

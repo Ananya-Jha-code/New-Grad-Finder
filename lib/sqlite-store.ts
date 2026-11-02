@@ -407,7 +407,8 @@ export function createSqliteStore(file = process.env.SQLITE_PATH || path.join(pr
       }
       const limit = Math.min(500, Math.max(1, filter.limit ?? 100));
       params.push(limit);
-      const sql = `SELECT * FROM jobs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY COALESCE(score, 0) DESC, first_seen_at DESC LIMIT ?`;
+      const order = filter.order === "newest" ? "first_seen_at DESC" : "COALESCE(score, 0) DESC, first_seen_at DESC";
+      const sql = `SELECT * FROM jobs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${order} LIMIT ?`;
       const rows = db.prepare(sql).all(...params) as JobRow[];
       return rows.map(mapJob);
     },
@@ -563,7 +564,8 @@ export function createSqliteStore(file = process.env.SQLITE_PATH || path.join(pr
     async listApplications() {
       const rows = db
         .prepare(
-          `SELECT a.job_id, a.status, a.notes, a.updated_at, j.title, j.company, j.canonical_url
+          `SELECT a.job_id, a.status, a.notes, a.updated_at, j.title, j.company, j.canonical_url,
+             j.location, j.posted_at, j.first_seen_at
            FROM applications a
            JOIN jobs j ON j.id = a.job_id
            ORDER BY a.updated_at DESC`,
@@ -576,6 +578,9 @@ export function createSqliteStore(file = process.env.SQLITE_PATH || path.join(pr
         title: string;
         company: string;
         canonical_url: string;
+        location: string | null;
+        posted_at: string | null;
+        first_seen_at: string;
       }>;
       return rows.map((row) => ({
         jobId: row.job_id,
@@ -585,6 +590,9 @@ export function createSqliteStore(file = process.env.SQLITE_PATH || path.join(pr
         title: row.title,
         company: row.company,
         canonicalUrl: row.canonical_url,
+        location: row.location,
+        postedAt: row.posted_at,
+        firstSeenAt: row.first_seen_at,
       }));
     },
     async upsertApplication(input: ApplicationInput) {

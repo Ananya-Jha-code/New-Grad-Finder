@@ -391,7 +391,11 @@ export function createSupabaseStore(): Store {
       const q = safeQuery(filter.q ?? "");
       if (q) query = query.or(`title.ilike.%${q}%,company.ilike.%${q}%`);
       const limit = Math.min(500, Math.max(1, filter.limit ?? 100));
-      const { data, error } = await query.order("score", { ascending: false, nullsFirst: false }).limit(limit);
+      const sorted =
+        filter.order === "newest"
+          ? query.order("first_seen_at", { ascending: false })
+          : query.order("score", { ascending: false, nullsFirst: false });
+      const { data, error } = await sorted.limit(limit);
       fail(error);
       return ((data ?? []) as JobRow[]).map(mapJob);
     },
@@ -530,15 +534,23 @@ export function createSupabaseStore(): Store {
     async listApplications() {
       const { data, error } = await db
         .from("applications")
-        .select("job_id, status, notes, updated_at, jobs(title, company, canonical_url)")
+        .select("job_id, status, notes, updated_at, jobs(title, company, canonical_url, location, posted_at, first_seen_at)")
         .order("updated_at", { ascending: false });
       fail(error);
+      type JobPart = {
+        title: string;
+        company: string;
+        canonical_url: string;
+        location: string | null;
+        posted_at: string | null;
+        first_seen_at: string;
+      };
       return ((data ?? []) as unknown as Array<{
         job_id: string;
         status: ApplicationStatus;
         notes: string;
         updated_at: string;
-        jobs: { title: string; company: string; canonical_url: string } | { title: string; company: string; canonical_url: string }[] | null;
+        jobs: JobPart | JobPart[] | null;
       }>).flatMap((row) => {
         const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs;
         if (!job) return [];
@@ -550,6 +562,9 @@ export function createSupabaseStore(): Store {
           title: job.title,
           company: job.company,
           canonicalUrl: job.canonical_url,
+          location: job.location,
+          postedAt: job.posted_at,
+          firstSeenAt: job.first_seen_at,
         }];
       });
     },

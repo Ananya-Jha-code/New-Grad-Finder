@@ -7,6 +7,7 @@ import { canonicalJobUrl, companyKey, dedupeKey, postingKey, titleCacheKey } fro
 import { evaluate, evaluateJobs, withRules, isCandidateTitle, ruleClassify, ruleDegree, ruleSeason, ruleUs } from "../lib/classify";
 import { parseCsv } from "../lib/csv";
 import { notifyDiscord } from "../lib/discord";
+import { isApplied, postedTime, timeAgo } from "../lib/posted";
 import { jitteredMs } from "../lib/jitter";
 import { buildLanes } from "../lib/poll";
 import { boardFromUrl, LIST_FEEDS, LIST_MAX_AGE_DAYS, listedRecently, parseMarkdownListings, simplifyKeep } from "../lib/sources";
@@ -556,4 +557,51 @@ test("discord alerts say new grad and split into messages of 10 cards", async (t
   assert.equal(bodies[0].content, "12 new grad matches. (1/2)");
   assert.equal(bodies[0].embeds[0].description, "Stripe · Seattle, WA · swe · new grad · 2027 start");
   assert.equal(bodies[0].embeds[1].description, "Stripe · Seattle, WA · swe · no level · 2027 start");
+});
+
+test("posted time reads dates, Workday's relative text, and falls back to first seen", () => {
+  const firstSeenAt = "2026-10-31T12:00:00.000Z";
+  const seen = Date.parse(firstSeenAt);
+  assert.equal(postedTime({ postedAt: "2026-10-29T08:00:00Z", firstSeenAt }), Date.parse("2026-10-29T08:00:00Z"));
+  assert.equal(postedTime({ postedAt: "Posted Today", firstSeenAt }), seen);
+  assert.equal(postedTime({ postedAt: "Posted Yesterday", firstSeenAt }), seen - 86_400_000);
+  assert.equal(postedTime({ postedAt: "Posted 3 Days Ago", firstSeenAt }), seen - 3 * 86_400_000);
+  assert.equal(postedTime({ postedAt: "Posted 30+ Days Ago", firstSeenAt }), seen - 30 * 86_400_000);
+  assert.equal(postedTime({ postedAt: null, firstSeenAt }), seen);
+  assert.equal(postedTime({ postedAt: "2099-01-01", firstSeenAt }), seen);
+  const now = Date.parse("2026-11-01T12:00:00Z");
+  assert.equal(timeAgo(now - 30_000, now), "just now");
+  assert.equal(timeAgo(now - 45 * 60_000, now), "45m ago");
+  assert.equal(timeAgo(now - 5 * 3_600_000, now), "5h ago");
+  assert.equal(timeAgo(now - 3 * 86_400_000, now), "3d ago");
+  assert.equal(isApplied("saved"), false);
+  assert.equal(isApplied("applied"), true);
+  assert.equal(isApplied("interviewing"), true);
+});
+
+test("applications carry posting details and jobs can be listed newest first", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "new-grad-finder-"));
+  const store = createSqliteStore(path.join(dir, "test.db"));
+  const draft = (n: number) => ({
+    company: "Figma",
+    title: `Software Engineer, New Grad ${n}`,
+    location: "San Francisco, CA",
+    url: `https://boards.greenhouse.io/figma/jobs/${n}`,
+    ats: "greenhouse" as const,
+    targetId: "greenhouse:figma",
+    externalId: String(n),
+    postedAt: "2026-10-30T00:00:00Z",
+  });
+  const first = await store.upsertJobs([draft(1)]);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await store.upsertJobs([draft(2)]);
+  const newest = await store.listJobs({ order: "newest", limit: 10 });
+  assert.deepEqual(newest.map((job) => job.title), ["Software Engineer, New Grad 2", "Software Engineer, New Grad 1"]);
+  const saved = await store.upsertApplication({ jobId: first.insertedIds[0], status: "applied" });
+  assert.equal(saved.status, "applied");
+  assert.equal(saved.location, "San Francisco, CA");
+  assert.equal(saved.postedAt, "2026-10-30T00:00:00Z");
+  assert.ok(saved.firstSeenAt);
+  await store.deleteApplication(first.insertedIds[0]);
+  assert.equal((await store.listApplications()).length, 0);
 });
