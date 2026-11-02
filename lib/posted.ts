@@ -25,7 +25,8 @@ export function timeAgo(at: number, now = Date.now()): string {
   return `${Math.round(days / 30)}mo ago`;
 }
 
-// Statuses that mean the application was sent; "saved" is only bookmarked.
+// Statuses that mean the application was sent; "saved" is only bookmarked and "hidden"
+// was dismissed without applying.
 export function isApplied(status: string): boolean {
-  return status !== "saved";
+  return status !== "saved" && status !== "hidden";
 }

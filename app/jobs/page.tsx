@@ -25,15 +25,17 @@ export default async function JobsPage({
     store.listJobs({ q, family: family || undefined, matchOnly, order: "newest", limit: 500 }),
     store.listApplications(),
   ]);
-  // Jobs already applied to live on the Applied page; the rest are listed newest posting first.
-  const applied = new Set(applications.filter((item) => isApplied(item.status)).map((item) => item.jobId));
+  // Jobs applied to or hidden live on the Applied and Hidden pages; the rest are listed newest posting first.
+  const moved = new Set(
+    applications.filter((item) => isApplied(item.status) || item.status === "hidden").map((item) => item.jobId),
+  );
   const jobs = found
-    .filter((job) => !applied.has(job.id))
+    .filter((job) => !moved.has(job.id))
     .map((job) => ({ job, posted: postedTime(job) }))
     .sort((a, b) => b.posted - a.posted);
   return (
     <main>
-      <p className="lede">A match is a full-time, entry-level software, ML/AI, or data role in the US with a 2027 start (or no year named), open to bachelor&apos;s or master&apos;s graduates. Newest postings come first. Tick Applied once you have applied and the role moves to the Applied page. Untick Matches only to see every stored role and why it was left out.</p>
+      <p className="lede">A match is a full-time, entry-level software, ML/AI, or data role in the US with a 2027 start (or no year named), open to bachelor&apos;s or master&apos;s graduates. Newest postings come first. Tick Applied once you have applied and the role moves to the Applied page. Hide a role you can&apos;t or won&apos;t apply to and it moves to the Hidden page. Untick Matches only to see every stored role and why it was left out.</p>
       <form className="toolbar" action="/jobs">
         <input name="q" defaultValue={q} placeholder="Title or company" />
         <select name="family" defaultValue={family}>
@@ -67,7 +69,7 @@ export default async function JobsPage({
             </thead>
             <tbody>
               {jobs.map(({ job, posted }) => (
-                <AppliedRow key={job.id} jobId={job.id} applied={false}>
+                <AppliedRow key={job.id} jobId={job.id} mode="jobs">
                   <td>
                     <a className="title-link" href={job.canonicalUrl} target="_blank" rel="noreferrer">{job.title}</a>
                     <span className="sub">{job.company}{job.location ? ` · ${job.location}` : ""}</span>

@@ -150,20 +150,37 @@ export function ruleClassify(title: string): TitleVerdict {
 const US_STATE_CODES =
   "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC";
 const US_CODE_RE = new RegExp(`(,|^|\\s|-)\\s*(${US_STATE_CODES})(\\b|$)`);
+// In titles a bare code is often a word ("AR Engineer", "Entra ID", "Engineer-CT"), so
+// there a code counts only after a comma ("Issaquah, WA").
+const US_CODE_AFTER_COMMA_RE = new RegExp(`,\\s*(${US_STATE_CODES})\\b`);
+const PLACEHOLDER_RE = /^(n\/?a|null|none|tbd|-+)$/i;
 const US_UPPER_RE = /\b(US|USA|U\.S\.A?\.?)\b/;
 const US_WORD_RE =
   /\b(united states|alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|nyc|san francisco|seattle|austin|boston|chicago|los angeles|san jose|palo alto|mountain view|menlo park|sunnyvale|santa clara|redmond|bellevue|denver|atlanta|miami|dallas|houston|pittsburgh|philadelphia|arlington|raleigh|san diego|irvine|minneapolis|detroit|salt lake city|honolulu)\b/i;
 const NON_US_RE =
-  /\b(canada|toronto|vancouver|montreal|ottawa|waterloo|calgary|mexico|brazil|s[aã]o paulo|london|united kingdom|uk|england|scotland|ireland|dublin|france|paris|germany|berlin|munich|netherlands|amsterdam|spain|madrid|barcelona|italy|milan|switzerland|zurich|sweden|stockholm|poland|warsaw|krakow|india|bengaluru|bangalore|hyderabad|pune|mumbai|delhi|gurgaon|gurugram|noida|chennai|singapore|japan|tokyo|korea|seoul|china|beijing|shanghai|shenzhen|hong kong|taiwan|taipei|australia|sydney|melbourne|israel|tel aviv|uae|dubai|emea|apac|europe|latam|philippines|manila|vietnam|argentina|buenos aires|colombia|bogot[aá]|chile|costa rica|romania|bucharest|portugal|lisbon|denmark|copenhagen|norway|oslo|finland|helsinki|belgium|brussels|austria|vienna|czech|prague|hungary|budapest|greece|athens|turkey|istanbul|egypt|cairo|nigeria|lagos|kenya|nairobi|south africa|new zealand|auckland)\b/i;
+  /\b(canada|toronto|vancouver|montreal|ottawa|waterloo|calgary|mexico|brazil|s[aã]o paulo|london|united kingdom|uk|england|scotland|ireland|dublin|france|paris|germany|berlin|munich|netherlands|amsterdam|spain|madrid|barcelona|italy|milan|switzerland|zurich|sweden|stockholm|poland|warsaw|krakow|india|bengaluru|bangalore|hyderabad|pune|mumbai|delhi|gurgaon|gurugram|noida|chennai|singapore|japan|tokyo|korea|seoul|china|beijing|shanghai|shenzhen|hong kong|taiwan|taipei|australia|sydney|melbourne|israel|tel aviv|uae|dubai|emea|apac|europe|latam|philippines|manila|vietnam|argentina|buenos aires|colombia|bogot[aá]|chile|costa rica|romania|bucharest|portugal|lisbon|denmark|copenhagen|norway|oslo|finland|helsinki|belgium|brussels|austria|vienna|czech|prague|hungary|budapest|greece|athens|turkey|istanbul|egypt|cairo|nigeria|lagos|kenya|nairobi|south africa|new zealand|auckland|iceland|reykjavik|luxembourg|guadalajara|monterrey|tijuana|shenyang|guangzhou|chengdu|hangzhou|nanjing|wuhan|suzhou|xiamen|dalian|tianjin|qingdao|xi'?an|hsinchu|osaka|kyoto|yokohama|busan|pangyo|clonmel|galway|cork|limerick|belfast|edinburgh|leeds|stoke[ -]on[ -]trent|eindhoven|rotterdam|utrecht|frankfurt|stuttgart|cologne|d[uü]sseldorf|erlangen|karlsruhe|lyon|toulouse|grenoble|lausanne|basel|gothenburg|malm[oö]|aarhus|espoo|tampere|turin|bologna|porto|leuven|ghent|antwerp|graz|brno|wroc[lł]aw|gda[nń]sk|cluj|ia[sș]i|sofia|bulgaria|belgrade|serbia|ukraine|kyiv|lviv|estonia|tallinn|lithuania|vilnius|latvia|riga|croatia|zagreb|slovakia|bratislava|slovenia|ljubljana|malaysia|kuala lumpur|penang|thailand|bangkok|indonesia|jakarta|pakistan|karachi|lahore|islamabad|bangladesh|dhaka|sri lanka|colombo|saudi|riyadh|qatar|doha|abu dhabi|morocco|uruguay|montevideo|ahmedabad|kolkata|kochi|coimbatore|jaipur|chandigarh|haifa|herzliya|jerusalem|quebec|edmonton|winnipeg|kitchener|mississauga|markham|burnaby|brisbane|adelaide|canberra|christchurch|cebu|hanoi|ho chi minh|da nang)\b/i;
 
 // True if any listed place is in the US, false if every place is outside it, null if unclear.
-export function ruleUs(location: string | null): boolean | null {
+// With fromTitle, a state code counts only after a comma (see US_CODE_AFTER_COMMA_RE).
+export function ruleUs(location: string | null, fromTitle = false): boolean | null {
   if (!location?.trim()) return null;
-  const parts = location.split(/;|\||\/|\n| or /).map((part) => part.trim()).filter(Boolean);
+  const parts = location
+    .replace(/\bn\/a\b/gi, "")
+    .split(/;|\||\/|\n| or /)
+    .map((part) => part.trim())
+    .filter((part) => part && !PLACEHOLDER_RE.test(part));
+  const codeRe = fromTitle ? US_CODE_AFTER_COMMA_RE : US_CODE_RE;
   let allForeign = parts.length > 0;
   for (const part of parts) {
+    // "Paris, TX" or "Dublin, OH, USA" is in the US even though the city name is also abroad.
+    // ", CA" and ", IN" are skipped here because they also mean Canada and India ("Toronto, ON, CA",
+    // "Pune, IN"), and a code followed by a country is not a state ("Chennai, TN, India").
+    const comma = part.match(US_CODE_AFTER_COMMA_RE);
+    const stateCode =
+      comma && comma[1] !== "CA" && comma[1] !== "IN" && !NON_US_RE.test(part.slice(comma.index! + comma[0].length));
+    if (US_UPPER_RE.test(part) || /united states/i.test(part) || stateCode) return true;
     const foreign = NON_US_RE.test(part);
-    if (!foreign && (US_CODE_RE.test(part) || US_UPPER_RE.test(part) || US_WORD_RE.test(part))) return true;
+    if (!foreign && (codeRe.test(part) || US_UPPER_RE.test(part) || US_WORD_RE.test(part))) return true;
     if (!foreign) allForeign = false;
   }
   return allForeign ? false : null;
@@ -299,7 +316,7 @@ export async function evaluateJobs(store: Store, limit: number, providersIn?: Ll
 
   // Some boards put the city in the title ("... Intern (2027) - Lisbon, PT") and only
   // "In-Office" in the location, so the title is checked when the location is unclear.
-  const usByRules = (job: Job) => ruleUs(job.location) ?? ruleUs(job.title);
+  const usByRules = (job: Job) => ruleUs(job.location) ?? ruleUs(job.title, true);
   const unclear = new Map<string, string>();
   for (const job of jobs) {
     if (job.location && usByRules(job) === null) unclear.set(titleCacheKey(job.location), job.location);

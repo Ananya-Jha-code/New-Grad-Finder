@@ -297,6 +297,23 @@ test("locations sort into US, abroad, and unclear", () => {
   assert.equal(ruleUs("Product Manager Intern (2027) - London, UK"), false);
   assert.equal(ruleUs("Software Engineer Intern (2027) - Austin, TX"), true);
   assert.equal(ruleUs("Software Engineer, Intern"), null);
+  // Real cases that slipped through: places missing from the list, and title words read as state codes.
+  assert.equal(ruleUs("Shenyang"), false);
+  assert.equal(ruleUs("Guangzhou"), false);
+  assert.equal(ruleUs("Reykjavik, Iceland"), false);
+  assert.equal(ruleUs("Clonmel, Ireland |  N/A"), false);
+  assert.equal(ruleUs("Toronto, ON, CA"), false);
+  assert.equal(ruleUs("Paris, TX"), true);
+  assert.equal(ruleUs("Vienna, VA"), true);
+  assert.equal(ruleUs("Chennai, TN, India"), false);
+  assert.equal(ruleUs("Pune, IN"), false);
+  assert.equal(ruleUs("Barcelona, CT, Spain"), false);
+  assert.equal(ruleUs("Advanced Software Engineer-CT", true), null);
+  assert.equal(ruleUs("AR Engineer", true), null);
+  assert.equal(ruleUs("IA & Data Engineer l Luxembourg", true), false);
+  assert.equal(ruleUs("Entra ID/ Active Directory Ops Engineer", true), null);
+  assert.equal(ruleUs("Serviceability Engineer - Issaquah, WA", true), true);
+  assert.equal(ruleUs("Software Engineer, AI Data - Evanston, IL, USA", true), true);
 });
 
 test("a match needs entry level, target family, a 2027 or unnamed start, degree, and the US", () => {
@@ -577,6 +594,7 @@ test("posted time reads dates, Workday's relative text, and falls back to first 
   assert.equal(isApplied("saved"), false);
   assert.equal(isApplied("applied"), true);
   assert.equal(isApplied("interviewing"), true);
+  assert.equal(isApplied("hidden"), false);
 });
 
 test("applications carry posting details and jobs can be listed newest first", async () => {

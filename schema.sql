@@ -102,10 +102,15 @@ update jobs set classify_model = null where match is null and classify_model is 
 
 create table if not exists applications (
   job_id text primary key references jobs (id) on delete cascade,
-  status text not null check (status in ('saved', 'applied', 'interviewing', 'offer', 'rejected', 'withdrawn')),
+  status text not null check (status in ('saved', 'applied', 'interviewing', 'offer', 'rejected', 'withdrawn', 'hidden')),
   notes text not null default '',
   updated_at timestamptz not null default now()
 );
+
+-- Databases made before the "hidden" status get the wider check.
+alter table applications drop constraint if exists applications_status_check;
+alter table applications add constraint applications_status_check
+  check (status in ('saved', 'applied', 'interviewing', 'offer', 'rejected', 'withdrawn', 'hidden'));
 
 create table if not exists poll_runs (
   id bigint generated always as identity primary key,

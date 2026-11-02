@@ -32,7 +32,7 @@ export default async function AppliedPage() {
                 const posted = postedTime(item);
                 const marked = Date.parse(item.updatedAt);
                 return (
-                  <AppliedRow key={item.jobId} jobId={item.jobId} applied>
+                  <AppliedRow key={item.jobId} jobId={item.jobId} mode="applied">
                     <td>
                       <a className="title-link" href={item.canonicalUrl} target="_blank" rel="noreferrer">{item.title}</a>
                       <span className="sub">{item.company}{item.location ? ` · ${item.location}` : ""}</span>

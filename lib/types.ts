@@ -39,6 +39,8 @@ export const APPLICATION_STATUSES = [
   "offer",
   "rejected",
   "withdrawn",
+  // Taken off the Jobs list without applying; the reason is kept in notes.
+  "hidden",
 ] as const;
 export type ApplicationStatus = (typeof APPLICATION_STATUSES)[number];
 
