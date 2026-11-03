@@ -10,7 +10,7 @@ import { notifyDiscord } from "../lib/discord";
 import { isApplied, postedTime, timeAgo } from "../lib/posted";
 import { jitteredMs } from "../lib/jitter";
 import { buildLanes } from "../lib/poll";
-import { boardFromUrl, LIST_FEEDS, LIST_MAX_AGE_DAYS, listedRecently, parseMarkdownListings, simplifyKeep } from "../lib/sources";
+import { boardFromUrl, curatedList, LIST_FEEDS, LIST_MAX_AGE_DAYS, listedRecently, parseMarkdownListings, simplifyKeep } from "../lib/sources";
 import { boardFromCrawlLine, boardsFromHnComment } from "../lib/discover";
 import { importTargets, seedStarter } from "../lib/seed";
 import { normalizeTarget } from "../lib/targets";
@@ -502,6 +502,35 @@ test("speedyapply markdown tables parse by header name", () => {
   assert.equal(items[0].date_posted, Math.floor((now - 6 * 86_400_000) / 1000));
   assert.equal(items[1].company_name, "Rivian");
   assert.equal(items[1].locations?.[0], "Irvine, CA +1");
+});
+
+test("Zapply tables are parsed and their links point at the board where possible", () => {
+  const apply = (id: string) => `[<img src="images/apply.png" width="80" alt="Apply">](https://zapply.jobs/l/d/${id}?s=gh-x)`;
+  const md = [
+    "| Company | Role | Location | Posted | Visa | **Apply** |",
+    "|---------|------|----------|--------|------|----------|",
+    `| **Verkada** | New Grad 2027: Backend Software Engineer | San Mateo, CA | 3h | ✅ Sponsor | ${apply("greenhouse-verkada-5280545007")} |`,
+    `| **Handshake** | Software Engineer, New Grad | San Francisco | 1w |  | ${apply("ashby-handshake-c2cea12b-4dba-4782-ac2d-279c6865a4b7")} |`,
+    `| **Boeing** | Software Engineer (Associate) | USA - Berkeley, MO | 12m | ✅ Sponsor | ${apply("workday-boeing-external-careers-JR2026507780")} |`,
+    `| **Point72** | Machine Learning Researcher - Intern | New York | 2024-08-15 | ✅ Sponsor | ${apply("greenhouse-point72-7302611002")} |`,
+    `| **Old Co** | Software Engineer | Remote | Date unknown |  | ${apply("greenhouse-oldco-1")} |`,
+  ].join("\n");
+  const now = Date.UTC(2026, 10, 3);
+  const items = parseMarkdownListings(md, now);
+  assert.equal(items.length, 5);
+  assert.equal(items[0].url, "https://job-boards.greenhouse.io/verkada/jobs/5280545007");
+  assert.equal(items[0].title, "New Grad 2027: Backend Software Engineer");
+  assert.equal(items[0].date_posted, Math.floor((now - 3 * 3_600_000) / 1000));
+  assert.equal(items[1].url, "https://jobs.ashbyhq.com/handshake/c2cea12b-4dba-4782-ac2d-279c6865a4b7");
+  assert.equal(items[2].url, "https://zapply.jobs/l/d/workday-boeing-external-careers-JR2026507780");
+  assert.equal(items[3].date_posted, Date.UTC(2024, 7, 15) / 1000);
+  assert.equal(items[4].date_posted, undefined);
+  // Old and undated rows are dropped; Zapply titles are not trusted as new-grad roles.
+  const zapply = LIST_FEEDS.zapply_swe;
+  assert.deepEqual(items.filter((item) => zapply.keep(item)).map((item) => item.company_name), ["Verkada", "Handshake", "Boeing"]);
+  assert.equal(curatedList("zapply_swe"), false);
+  assert.equal(curatedList("simplify"), true);
+  assert.deepEqual(boardFromUrl("Verkada", items[0].url), { company: "Verkada", ats: "greenhouse", boardToken: "verkada" });
 });
 
 test("new-grad lists drop stale, hardware, product, and PhD/MBA-only listings", () => {

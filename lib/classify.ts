@@ -13,6 +13,7 @@ import { ROLE_FAMILIES, TARGET_FAMILIES } from "./types";
 import { titleCacheKey } from "./canonicalize";
 import { envInt } from "./jitter";
 import { askJson, llmProviders, type LlmProvider } from "./llm";
+import { curatedList } from "./sources";
 
 type TitleVerdict = Omit<Classification, "cacheKey" | "title">;
 
@@ -337,7 +338,9 @@ export async function evaluateJobs(store: Store, limit: number, providersIn?: Ll
     if (!title) continue;
     const ruled = usByRules(job);
     const us = ruled ?? (job.location ? places.get(titleCacheKey(job.location))?.us ?? null : null);
-    const listed = job.sourceUrls.some((source) => source.ats === "list");
+    const listed = job.sourceUrls.some(
+      (source) => source.ats === "list" && curatedList(source.targetId.replace(/^list:/, "")),
+    );
     rows.push(evaluate(job.id, withRules(job.title, title, listed), us));
   }
   await store.saveEvaluations(rows);

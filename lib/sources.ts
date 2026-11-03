@@ -398,8 +398,31 @@ type Listing = {
   degrees?: string[];
 };
 
-// speedyapply publishes Markdown tables (FAANG+, Quant, Other) instead of JSON. Columns
-// are found by header name because the tables do not all have the same ones.
+const AGE_UNIT_MS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 7 * 86_400_000, mo: 30 * 86_400_000 };
+
+// Ages read "6d" (speedyapply) or "12m", "3h", "1w", "1mo" (Zapply); Zapply also gives dates.
+function postedFromAge(cell: string, now: number): number | undefined {
+  const age = cell.match(/^(\d+)\s*(mo|m|h|d|w)$/);
+  if (age) return Math.floor((now - Number(age[1]) * AGE_UNIT_MS[age[2]]) / 1000);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(cell) ? Date.parse(cell) : NaN;
+  return Number.isFinite(date) ? Math.floor(date / 1000) : undefined;
+}
+
+// Zapply links are redirects whose id names the source ("greenhouse-verkada-5280545007",
+// "ashby-handshake-<uuid>"). Those are turned into the board's own link, so the job matches
+// the same posting from the board and the board can be discovered; others stay as given.
+export function zapplyDirectUrl(raw: string): string {
+  const id = raw.match(/zapply\.jobs\/l\/d\/([^/?#]+)/)?.[1];
+  if (!id) return raw;
+  const greenhouse = id.match(/^greenhouse-([a-z0-9]+)-(\d+)$/i);
+  if (greenhouse) return `https://job-boards.greenhouse.io/${greenhouse[1]}/jobs/${greenhouse[2]}`;
+  const uuid = id.match(/^(ashby|lever)-(.+)-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+  if (uuid) return uuid[1] === "ashby" ? `https://jobs.ashbyhq.com/${uuid[2]}/${uuid[3]}` : `https://jobs.lever.co/${uuid[2]}/${uuid[3]}`;
+  return raw.replace(/\?.*$/, "");
+}
+
+// speedyapply (FAANG+, Quant, Other) and Zapply (one table per role group) publish Markdown
+// tables instead of JSON. Columns are found by header name because the tables differ.
 export function parseMarkdownListings(markdown: string, now = Date.now()): Listing[] {
   const text = (cell: string) => cell.replace(/<[^>]+>/g, "").replace(/\*\*/g, "").trim();
   const items: Listing[] = [];
@@ -411,23 +434,24 @@ export function parseMarkdownListings(markdown: string, now = Date.now()): Listi
     }
     const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
     if (cells[0] === "Company") {
-      columns = cells.map((cell) => cell.toLowerCase());
+      columns = cells.map((cell) => text(cell).toLowerCase());
       continue;
     }
     if (columns.length === 0 || cells.every((cell) => /^-*$/.test(cell))) continue;
-    const at = (name: string) => cells[columns.indexOf(name)] ?? "";
-    const url = at("posting").match(/href="([^"]+)"/)?.[1];
-    const age = Number(at("age").match(/^(\d+)d$/)?.[1]);
+    const at = (name: string) => (columns.includes(name) ? cells[columns.indexOf(name)] ?? "" : "");
+    const link = at("posting") || at("apply");
+    const href = link.match(/href="([^"]+)"/)?.[1] ?? link.match(/\]\((https?:\/\/[^)\s]+)\)/)?.[1];
     const company = text(at("company"));
-    const title = text(at("position"));
-    if (!url || !company || !title) continue;
+    const title = text(at("position") || at("role"));
+    if (!href || !company || !title) continue;
+    const url = zapplyDirectUrl(href);
     items.push({
       id: url,
       title,
       company_name: company,
       url,
       locations: text(at("location")) ? [text(at("location"))] : [],
-      date_posted: Number.isFinite(age) ? Math.floor((now - age * 86_400_000) / 1000) : undefined,
+      date_posted: postedFromAge(text(at("age") || at("posted")), now),
       active: true,
     });
   }
@@ -439,6 +463,9 @@ type ListFeed = {
   url: string;
   keep: (item: Listing) => boolean;
   parse?: (body: string) => Listing[];
+  // false for lists that mix in internships and senior roles: their titles go through the
+  // same checks as board titles instead of being trusted as new-grad roles.
+  curated?: boolean;
 };
 
 // 2027 new-grad hiring opened in summer 2026; older postings still marked active are
@@ -460,7 +487,10 @@ export function simplifyKeep(item: Listing, now = Date.now()): boolean {
 }
 
 // Community lists of open new-grad roles. SimplifyJobs and vanshb03 publish the same
-// listings.json shape; speedyapply's US new-grad tables are parsed from its Markdown.
+// listings.json shape; speedyapply's and Zapply's tables are parsed from their Markdown.
+// Zapply rows without a date are mostly old postings, so they are skipped.
+const zapplyKeep = (item: Listing) => item.date_posted !== undefined && listedRecently(item);
+
 export const LIST_FEEDS: Record<string, ListFeed> = {
   simplify: {
     company: "SimplifyJobs list",
@@ -478,7 +508,26 @@ export const LIST_FEEDS: Record<string, ListFeed> = {
     keep: (item) => listedRecently(item),
     parse: (body) => parseMarkdownListings(body),
   },
+  zapply_swe: {
+    company: "Zapply SWE list",
+    url: "https://raw.githubusercontent.com/zapplyjobs/New-Grad-Software-Engineering-Jobs-2027/main/README.md",
+    keep: zapplyKeep,
+    parse: (body) => parseMarkdownListings(body),
+    curated: false,
+  },
+  zapply_data: {
+    company: "Zapply data science list",
+    url: "https://raw.githubusercontent.com/zapplyjobs/New-Grad-Data-Science-Jobs-2027/main/README.md",
+    keep: zapplyKeep,
+    parse: (body) => parseMarkdownListings(body),
+    curated: false,
+  },
 };
+
+// Whether jobs from this list are trusted as new-grad roles (see ListFeed.curated).
+export function curatedList(feed: string): boolean {
+  return LIST_FEEDS[feed]?.curated !== false;
+}
 
 export type ListResult = { jobs: RemoteJob[]; boards: TargetInput[] };
 

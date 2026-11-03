@@ -2,7 +2,7 @@ import { evaluateJobs, isCandidateTitle } from "./classify";
 import { notifyDiscord } from "./discord";
 import { envInt, jitteredMs, sleep } from "./jitter";
 import { SourceError } from "./http";
-import { fetchList, fetchTargetJobs, LIST_FEEDS, type RemoteJob, toDrafts } from "./sources";
+import { curatedList, fetchList, fetchTargetJobs, LIST_FEEDS, type RemoteJob, toDrafts } from "./sources";
 import { llmProviders } from "./llm";
 import { getStore } from "./store";
 import { isDue } from "./targets";
@@ -92,9 +92,10 @@ async function pollOne(store: Store, target: Target, summary: PollSummary, found
     // First successful poll of a board: existing openings are not news.
     const baseline = !target.lastOkAt;
     const list = target.ats === "list";
-    // Lists are curated new-grad roles, so their titles skip the title filter.
+    // Curated lists are new-grad roles, so their titles skip the title filter.
+    const trusted = list && curatedList(target.boardToken ?? "");
     const candidates = drafts
-      .filter((draft) => list || isCandidateTitle(draft.title))
+      .filter((draft) => trusted || isCandidateTitle(draft.title))
       .map((draft) => ({ ...draft, quiet: baseline && !postedRecently(draft.postedAt), looseMatch: list }));
     const result = await store.upsertJobs(candidates);
     summary.jobsSeen += drafts.length;
@@ -189,7 +190,20 @@ async function runPoll(opts: { targetId?: string; force?: boolean }): Promise<Po
   if (found.length > 0) await step("discovery", async () => void (summary.discovered = await store.addTargets(found)));
 
   const providers = await llmProviders();
-  await step("labelling", async () => void (summary.classified = await evaluateJobs(store, envInt("EVALUATE_LIMIT", 1000), providers)));
+  // A run can store thousands of new jobs (new boards' first polls), more than one batch
+  // labels. The first batch may ask a model; later batches use rules and titles a model
+  // already labelled, until no job is left unlabelled or the time budget is spent. Without
+  // this the backlog grew every run and older jobs were never judged.
+  await step("labelling", async () => {
+    const limit = envInt("EVALUATE_LIMIT", 1000);
+    const stopAt = Date.now() + envInt("EVALUATE_MINUTES", 8) * 60_000;
+    let done = await evaluateJobs(store, limit, providers);
+    summary.classified = done;
+    while (done > 0 && Date.now() < stopAt) {
+      done = await evaluateJobs(store, limit, []);
+      summary.classified += done;
+    }
+  });
 
   if (process.env.DISCORD_WEBHOOK_URL?.trim()) {
     try {
